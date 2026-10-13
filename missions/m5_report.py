@@ -53,6 +53,33 @@ def run(verbose: bool = True) -> dict:
     }
 
     md = report.build_report(baseline, optimized, levers, sustainability=sust)
+    reasoning = r2["reasoning_comparison"]
+    non_reasoning = reasoning["non_reasoning"]
+    reasoning_on = reasoning["reasoning"]
+    reasoning_lines = [
+        "",
+        "## Reasoning token budget",
+        "",
+        "| Traffic | Requests | Tokens | Actual optimized cost | Energy | Standard-route cost at equal token volume | Energy at equal token volume |",
+        "|---|---:|---:|---:|---:|---:|---:|",
+    ]
+    for label, group in (("is_reasoning=0", non_reasoning), ("is_reasoning=1", reasoning_on)):
+        reasoning_lines.append(
+            f"| {label} | {group['requests']:,} | {group['tokens']:,} | ${group['cost']:,.2f} "
+            f"| {group['wh']:,.2f} Wh | ${group['cost_at_comparable_tokens']:,.2f} "
+            f"| {group['wh_at_comparable_tokens']:,.2f} Wh |"
+        )
+    reasoning_lines += [
+        "",
+        f"Equal-volume comparison uses {reasoning['comparable_tokens']:,} tokens per cohort. "
+        f"Reasoning costs {reasoning['cost_ratio_per_equal_tokens']:.2f}x and uses "
+        f"{reasoning['wh_ratio_per_equal_tokens']:.1f}x the energy of non-reasoning traffic at that volume.",
+        "",
+        f"**Routing proposal:** enable reasoning only when the confidence score is below "
+        f"{reasoning['confidence_threshold']:.2f}; route higher-confidence requests through the standard path. "
+        "This is a starting threshold and should be tuned against quality and latency targets.",
+    ]
+    md += "\n" + "\n".join(reasoning_lines) + "\n"
     out_md = os.path.join(ROOT, "outputs", "report.md")
     os.makedirs(os.path.dirname(out_md), exist_ok=True)
     with open(out_md, "w") as f:
@@ -65,7 +92,8 @@ def run(verbose: bool = True) -> dict:
         print(f"\nWritten: outputs/report.md" + (f" + outputs/savings.png" if png else " (matplotlib absent: PNG skipped)"))
 
     return {"baseline_monthly": round(baseline), "optimized_monthly": round(optimized),
-            "levers": levers, "total_savings_pct": round(total_pct, 1)}
+            "levers": levers, "total_savings_pct": round(total_pct, 1),
+            "reasoning_comparison": reasoning}
 
 
 if __name__ == "__main__":

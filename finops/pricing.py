@@ -52,6 +52,24 @@ def discount_stack(
     return cache_mult * batch_mult
 
 
+def cache_is_worth_it(
+    avg_cache_reads: float,
+    write_cost_per_m: float,
+    read_discount: float = 0.10,
+) -> bool:
+    """Whether read savings across the average cache lifetime repay the write.
+
+    ``avg_cache_reads`` is the expected number of reads for each cached prefix.
+    ``read_discount`` is the fraction of normal read price charged (0.10 means
+    cached reads cost 10%, saving 90% per read). ``write_cost_per_m`` and the
+    avoided read cost must use the same per-million-token price basis.
+    """
+    reads = max(0.0, avg_cache_reads)
+    write_cost = max(0.0, write_cost_per_m)
+    saved_fraction = 1.0 - max(0.0, min(1.0, read_discount))
+    return reads * saved_fraction > write_cost
+
+
 def break_even_utilization(discount_frac: float) -> float:
     """Utilization at which a commitment pays off ~= 1 - discount.
 

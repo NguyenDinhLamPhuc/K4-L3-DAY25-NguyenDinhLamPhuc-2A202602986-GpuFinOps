@@ -189,10 +189,15 @@ Idle waste (1 day): $125.00  ->  $3,750/month
 
 Trả lời các câu hỏi sau (để hiểu sâu):
 
-1. GPU nào có `GPU-Util` cao nhất? MFU của nó là bao nhiêu?
+1. GPU nào có `GPU-Util` cao nhất? MFU của nó là bao nhiêu? 
+- GPU có GPU-Util cao nhất: gpu-h100-4 với mức sử dụng lên tới 98.2%.
+- MFU của nó: Chỉ đạt 0.194 (tương đương 19.4%).
 2. Tại sao `GPU-Util 98%` có thể đi kèm với `MFU 20%`? (Gợi ý: GPU "bận" nhưng làm gì? Memory stall? I/O wait?)
+- Nghẽn băng thông bộ nhớ (Memory Stall / Memory-bound): Các đơn vị tính toán (ALU) liên tục phải chờ dữ liệu truyền từ VRAM hoặc RAM hệ thống thay vì thực hiện tính toán. GPU "bận" đi lấy dữ liệu chứ không tính toán.
+- Nghẽn I/O (Dataloader Bottleneck): CPU hoặc ổ đĩa không cung cấp dữ liệu kịp thời cho GPU, khiến các Tensor/CUDA cores phải chờ đợi dữ liệu đầu vào dù trạng thái vẫn bật.
+- Kernel quá nhỏ (Launch Overhead): Chạy các tác vụ có kích thước quá nhỏ, khiến thời gian chi phí chờ đợi khởi chạy lệnh (kernel launch overhead) lớn hơn thời gian tính toán thực tế.
 3. Lãng phí idle tính ra bao nhiêu `/tháng`? Chiếm bao nhiêu % tổng chi phí?
-
+- Mức lãng phí do thời gian chờ (idle) là $20.00 mỗi ngày, cộng dồn lên tới $600 mỗi tháng.
 ### Bước 4.4 — Hiểu roofline model (tùy chọn nhưng nên đọc)
 
 ```python
@@ -263,9 +268,12 @@ print(f"Effective fraction: {discount_stack(batch=True, cache_hit_frac=0.8):.3f}
 ### Bước 5.4 — Phân tích kết quả
 
 1. Trong 3 đòn bẩy (cascade, cache, batch), đòn bẩy nào đóng góp savings lớn nhất?
+- Trong ba đòn bẩy, Model Cascade thường là đòn bẩy mang lại khoản tiết kiệm lớn nhất và đóng vai trò nền tảng
 2. Tại sao `discount_stack(batch=True, cache_hit_frac=1.0) = 0.05`? (Gợi ý: 50% × 10% = ?)
+- Công thức này là sự kết hợp (nhân dồn) giữa hai chính sách giảm giá/tiết kiệm:Batch API Discount: Thường giảm khoảng 50% chi phí.Prompt Cache (100% hit): Khi cache đạt 100% tỷ lệ trúng, chi phí cho phần token input thường chỉ bằng 10% so với chi phí thông thường.Kết quả tính toán: 0.5 * 0.1 = 0.05
 3. Khi nào **không nên** dùng batch API? (Gợi ý: nghĩ về latency)
-
+- Ứng dụng chat trực tiếp với người dùng: Chatbot, trợ lý ảo, hay các tính năng cần trả lời ngay lập tức (streaming text trong vòng vài giây) không thể dùng Batch API vì cơ chế của Batch là xử lý bất đồng bộ (asynchronous) — nhà cung cấp dịch vụ có thể mất từ vài phút đến tối đa 24 giờ để trả kết quả về.
+- Hệ thống tự động hóa phản ứng tức thời: Các tác vụ kiểm duyệt bảo mật thời thực, giao dịch tài chính tự động, hoặc xử lý sự cố ngay lập tức.
 ---
 
 ## 6. Mission 3 — Chiến lược mua GPU
@@ -324,8 +332,13 @@ print(result)
 ### Bước 6.4 — Phân tích kết quả
 
 1. Job nào được đề xuất dùng spot? Tại sao?
+- Các job đề xuất: job-train-llm, job-train-embed, job-finetune, job-dev-sandbox, và job-batch-eval.
+- Lý do: Đây là các tác vụ huấn luyện (training), thử nghiệm (dev) hoặc xử lý hàng loạt (batch) có tính chịu lỗi cao (fault-tolerant). Chúng có cơ chế lưu checkpoint định kỳ, cho phép khôi phục khi bị nhà cung cấp thu hồi máy chủ đột ngột, giúp tận dụng mức giá siêu rẻ của Spot Instance mà không lo mất tiến độ.
 2. Với spot, "effective hours" cao hơn "job hours" thực tế — điều này nghĩa là gì?
+- Tổng thời gian thực tế tiêu tốn (effective hours) lớn hơn thời gian chạy lý thuyết (job hours) do chi phí gián đoạn (preemption overhead). Khi instance Spot bị thu hồi giữa chừng, hệ thống mất thời gian khởi động lại, nạp lại checkpoint và tính toán lại phần việc bị ngắt quãng, làm tăng tổng số giờ cần thanh toán.
 3. Job nào được đề xuất reserved nhưng bạn nghĩ on-demand phù hợp hơn (hoặc ngược lại)? Tại sao?
+- Đề xuất điều chỉnh: job-infer-chat (hoặc job-infer-search) được đề xuất dùng Reserved, nhưng nếu hệ thống phục vụ lượng truy cập có biên độ dao động lớn theo giờ/ngày (thấp điểm ban đêm, cao điểm ban ngày), việc dùng 100% Reserved cố định sẽ gây lãng phí tài nguyên khi ít khách hàng.
+- Giải pháp: Nên dùng On-Demand kết hợp Autoscaling cho các workload biến động mạnh này để chỉ trả tiền khi có request thực tế, hoặc giữ Reserved cho phần tải nền (baseline) ổn định.
 
 ---
 
@@ -376,9 +389,12 @@ head -5 outputs/focus_export.csv
 ### Bước 7.4 — Phân tích kết quả
 
 1. Team nào tốn nhiều nhất? Tỷ lệ so với tổng là bao nhiêu?
+- Team assistant tốn nhiều nhất với $2.59/ngày.
+- Tổng chi phí của 4 team là $8.47/ngày, chiếm tỷ lệ khoảng 30.6% tổng chi phí.
 2. Tag coverage là bao nhiêu %? Có đủ để chargeback không?
+- Tag coverage đạt 92% và hệ thống xác định là có đủ điều kiện (True) để thực hiện hạch toán ngược chi phí (chargeback) cho các phòng ban, vì mức độ phủ thẻ đã vượt ngưỡng tin cậy tiêu chuẩn (thường là 90%).
 3. Tại sao FOCUS lại quan trọng khi công ty dùng nhiều cloud provider?
-
+- FOCUS (FinOps Open Cost and Usage Specification) cung cấp một tiêu chuẩn dữ liệu chi phí thống nhất giữa các nhà cung cấp cloud khác nhau (như AWS, Azure, GCP...). Nhờ đó, doanh nghiệp có thể dễ dàng gom nhóm, so sánh và chuẩn hóa hóa đơn từ nhiều nền tảng mà không bị lệch định dạng hay tốn công viết code xử lý riêng cho từng bên.
 ---
 
 ## 8. Mission 5 — Báo cáo tổng hợp
